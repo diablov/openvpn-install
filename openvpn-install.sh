@@ -512,7 +512,7 @@ function installQuestions() {
 			echo "   2) 3072 bits"
 			echo "   3) 4096 bits"
 			until [[ $RSA_KEY_SIZE_CHOICE =~ ^[1-3]$ ]]; do
-				read -rp "RSA key size [1-3]: " -e -i 1 RSA_KEY_SIZE_CHOICE
+				read -rp "RSA key size [1-3]: " -e -i 3 RSA_KEY_SIZE_CHOICE
 			done
 			case $RSA_KEY_SIZE_CHOICE in
 			1)
@@ -651,7 +651,7 @@ function installQuestions() {
 	echo "You will be able to generate a client at the end of the installation."
 	APPROVE_INSTALL=${APPROVE_INSTALL:-n}
 	if [[ $APPROVE_INSTALL =~ n ]]; then
-		read -n1 -r -p "Press any key to continue..."
+		read -n 1 -r -p "Press any key to continue..."
 	fi
 }
 
@@ -744,9 +744,32 @@ function installOpenVPN() {
 	fi
 
 	# Install the latest version of easy-rsa from source, if not already installed.
-	if [[ ! -d /etc/openvpn/easy-rsa/ ]]; then
-		local version="3.1.2"
+	if [[ ! -e /etc/openvpn/easy-rsa/easyrsa ]]; then
+		local version="3.2.2"
 		wget -O ~/easy-rsa.tgz https://github.com/OpenVPN/easy-rsa/releases/download/v${version}/EasyRSA-${version}.tgz
+		
+		if [[ $? -ne 0 ]]; then
+			echo ""
+			echo "    Download failed. Try to find in current dir:${shell_dir} for EasyRSA-${version}.tgz"
+
+			if [[ ! -e "EasyRSA-${version}.tgz" ]]; then
+				echo ""
+				echo "    **** Please manualy download easy-rsa and name it as: ${shell_dir}/EasyRSA-${version}.tgz"
+				read -n 1 -r -p "    **** Press any key When your file are ready......"
+			else
+				echo "use ${shell_dir}/EasyRSA-${version}.tgz"
+			fi
+			
+			if [[ -e "${shell_dir}/EasyRSA-${version}.tgz" ]]; then
+				cp ${shell_dir}/EasyRSA-${version}.tgz $HOME/easy-rsa.tgz
+			else
+				echo "    **** Can't find:${shell_dir}/EasyRSA-${version}.tgz"
+			fi
+		else
+			echo "$HOME/easy-rsa.tgz already exists."
+			
+		fi
+		
 		mkdir -p /etc/openvpn/easy-rsa
 		tar xzf ~/easy-rsa.tgz --strip-components=1 --no-same-owner --directory /etc/openvpn/easy-rsa
 		rm -f ~/easy-rsa.tgz
@@ -769,6 +792,11 @@ function installOpenVPN() {
 		echo "$SERVER_NAME" >SERVER_NAME_GENERATED
 
 		# Create the PKI, set up the CA, the DH params and the server certificate
+		if [[ ! -e ./easyrsa ]]; then
+			echo ""
+			echo "easyrsa not installed"
+			exit
+		fi
 		./easyrsa init-pki
 		EASYRSA_CA_EXPIRE=3650 ./easyrsa --batch --req-cn="$SERVER_CN" build-ca nopass
 
@@ -1118,7 +1146,7 @@ function newClient() {
 	CLIENTEXISTS=$(tail -n +2 /etc/openvpn/easy-rsa/pki/index.txt | grep -c -E "/CN=$CLIENT\$")
 	if [[ $CLIENTEXISTS == '1' ]]; then
 		echo ""
-		echo "The specified client CN was already found in easy-rsa, please choose another name."
+		echo "The specified client CN:$CLIENT was already found in easy-rsa, please choose another name."
 		exit
 	else
 		cd /etc/openvpn/easy-rsa/ || return
@@ -1134,22 +1162,23 @@ function newClient() {
 		echo "Client $CLIENT added."
 	fi
 
+	local homeDir="${shell_dir}"
 	# Home directory of the user, where the client configuration will be written
-	if [ -e "/home/${CLIENT}" ]; then
-		# if $1 is a user name
-		homeDir="/home/${CLIENT}"
-	elif [ "${SUDO_USER}" ]; then
-		# if not, use SUDO_USER
-		if [ "${SUDO_USER}" == "root" ]; then
-			# If running sudo as root
-			homeDir="/root"
-		else
-			homeDir="/home/${SUDO_USER}"
-		fi
-	else
-		# if not SUDO_USER, use /root
-		homeDir="/root"
-	fi
+	#if [ -e "/home/${CLIENT}" ]; then
+	#	# if $1 is a user name
+	#	homeDir="/home/${CLIENT}"
+	#elif [ "${SUDO_USER}" ]; then
+	#	# if not, use SUDO_USER
+	#	if [ "${SUDO_USER}" == "root" ]; then
+	#		# If running sudo as root
+	#		homeDir="/root"
+	#	else
+	#		homeDir="/home/${SUDO_USER}"
+	#	fi
+	#else
+	#	# if not SUDO_USER, use /root
+	#	homeDir="/root"
+	#fi
 
 	# Determine if we use tls-auth or tls-crypt
 	if grep -qs "^tls-crypt" /etc/openvpn/server.conf; then
@@ -1220,8 +1249,8 @@ function revokeClient() {
 	rm -f /etc/openvpn/crl.pem
 	cp /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn/crl.pem
 	chmod 644 /etc/openvpn/crl.pem
-	find /home/ -maxdepth 2 -name "$CLIENT.ovpn" -delete
-	rm -f "/root/$CLIENT.ovpn"
+	#find /home/ -maxdepth 2 -name "$CLIENT.ovpn" -delete
+	#rm -f "/root/$CLIENT.ovpn"
 	sed -i "/^$CLIENT,.*/d" /etc/openvpn/ipp.txt
 	cp /etc/openvpn/easy-rsa/pki/index.txt{,.bk}
 
@@ -1352,8 +1381,10 @@ function manageMenu() {
 	echo "   2) Revoke existing user"
 	echo "   3) Remove OpenVPN"
 	echo "   4) Exit"
-	until [[ $MENU_OPTION =~ ^[1-4]$ ]]; do
-		read -rp "Select an option [1-4]: " MENU_OPTION
+	echo "   5) Reinstall OpenVPN"
+	echo "   6) Chang Subnet"
+	until [[ $MENU_OPTION =~ ^[1-6]$ ]]; do
+		read -rp "Select an option [1-6]: " MENU_OPTION
 	done
 
 	case $MENU_OPTION in
@@ -1369,12 +1400,25 @@ function manageMenu() {
 	4)
 		exit 0
 		;;
+	5)
+		installOpenVPN
+		;;
+	6)
+		echo "Please modify /etc/iptables/add-openvpn-rules.sh"
+		echo 'or Modify & Run:"
+iptables -t nat -I POSTROUTING 1 -s 10.8.0.0/24 -o $NIC -j MASQUERADE
+iptables -I INPUT 1 -i tun0 -j ACCEPT
+iptables -I FORWARD 1 -i $NIC -o tun0 -j ACCEPT
+iptables -I FORWARD 1 -i tun0 -o $NIC -j ACCEPT
+iptables -I INPUT 1 -i $NIC -p $PROTOCOL --dport $PORT -j ACCEPT" >/etc/iptables/add-openvpn-rules.sh'
+		;;
 	esac
 }
 
 # Check for root, TUN, OS...
 initialCheck
 
+shell_dir=$(pwd)
 # Check if OpenVPN is already installed
 if [[ -e /etc/openvpn/server.conf && $AUTO_INSTALL != "y" ]]; then
 	manageMenu
